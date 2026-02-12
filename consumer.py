@@ -1,50 +1,50 @@
-import mysql.connector
-import time
+from google.cloud import pubsub_v1
+import glob
+import json
+import os
 
-MYSQL_CONFIG = {
-    'host': '34.130.27.176',
-    'port': 3306,
-    'user': 'usr',
-    'password': 'sofe4630u',
-    'database': 'Readings'
-}
+files = glob.glob("*.json")
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = files[0]
 
-print(f"Connected to MySQL at {MYSQL_CONFIG['host']}\n")
-print("Monitoring for new weather data...\n")
+project_id = "project-edb2abd3-fb0c-4576-b73"
 
-last_id = 0
+
+subscription_name = "weatherApp-processsed-sub"
+
+subscriber = pubsub_v1.SubscriberClient()
+subscription_path = subscriber.subscription_path(project_id, subscription_name)
+
+print(f"Listening for messages on {subscription_path}...\n")
+print("=" * 60)
+
+def callback(message):
+    """Process incoming messages from the processed topic."""
+    try:
+        # Decode and parse the JSON message
+        data = json.loads(message.data.decode("utf-8"))
+        
+        print(f"Received processed message:")
+        print(f"  Time:        {data.get('time')}")
+        print(f"  Profile:     {data.get('profileName')}")
+        print(f"  Temperature: {data.get('temperature'):.2f} °F") 
+        print(f"  Humidity:    {data.get('humidity'):.2f} %")
+        print(f"  Pressure:    {data.get('pressure'):.4f} psi")  
+        print("-" * 60)
+        
+        message.ack()
+        
+    except Exception as e:
+        print(f"Error processing message: {e}")
+        message.ack()  # Ack anyway to avoid redelivery loop
+
+# Subscribe and listen
+streaming_pull_future = subscriber.subscribe(subscription_path, callback=callback)
+
+print("Consumer is running. Press Ctrl+C to exit.\n")
 
 try:
-    while True:
-        connection = mysql.connector.connect(**MYSQL_CONFIG)
-        cursor = connection.cursor(dictionary=True)
-        
-        query = """
-            SELECT id, time, profileName, temperature, humidity, pressure, created_at
-            FROM WeatherData
-            WHERE id > %s
-            ORDER BY id ASC
-        """
-        
-        cursor.execute(query, (last_id,))
-        new_records = cursor.fetchall()
-        cursor.close()
-        connection.close()
-        
-        if new_records:
-            for record in new_records:
-                print(f"ID: {record['id']}")
-                print(f"Time: {record['time']}")
-                print(f"Profile: {record['profileName']}")
-                print(f"Temperature: {record['temperature']}")
-                print(f"Humidity: {record['humidity']}")
-                print(f"Pressure: {record['pressure']}")
-                print(f"Created At: {record['created_at']}")
-                print("-" * 50)
-                
-                last_id = record['id']
-        
-        time.sleep(2)
-        
+    streaming_pull_future.result()
 except KeyboardInterrupt:
-    print("\nStopped monitoring")
+    streaming_pull_future.cancel()
+    streaming_pull_future.result()
+    print("\nConsumer stopped.")
